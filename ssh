@@ -1,0 +1,26 @@
+#!/bin/bash
+
+# update sshd_config
+if [[ -z $(sudo cat /etc/ssh/sshd_config | grep AllowUsers) ]]; then
+  echo "Update sshd_config"
+  if [ "$USER" == "root" ]; then
+    if [ -n "$USERNAME" ]; then
+      read -p 'SSH User: ' SSH_USER
+    else
+      SSH_USER=$USERNAME
+    fi
+  else
+    SSH_USER=$USER
+  fi
+  sudo cp -p /etc/ssh/sshd_config /etc/ssh/sshd_config.orig
+  read -p 'SSH Port (leave blank for default 22, recommend 55822): ' SSH_PORT
+  if [ -n "$SSH_PORT" ]; then
+    sudo sed -ri "s/^#?Port .*/Port $SSH_PORT/" /etc/ssh/sshd_config
+  fi
+  sudo sed -ri 's/^#?PermitRootLogin .*/PermitRootLogin no/' /etc/ssh/sshd_config
+  sudo sed -ri 's/^#?PubkeyAuthentication .*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+  sudo sed -ri 's/^#?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config
+  sudo sed -i "\$aAllowUsers $SSH_USER" /etc/ssh/sshd_config
+  sudo sed -i "\$aProtocol 2" /etc/ssh/sshd_config
+  sudo service ssh restart
+fi

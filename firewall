@@ -1,0 +1,11 @@
+#!/bin/bash
+
+read -p 'Enable Uncomplicated Firewall?: ' ENABLE_FIREWALL
+if [ -n "$ENABLE_FIREWALL" ]; then
+  sudo ufw enable
+  sudo ufw allow 22
+  sudo ufw allow 80
+  sudo ufw allow 443
+  sudo ufw allow 8080
+  sudo ufw status verbose
+end

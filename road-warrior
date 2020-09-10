@@ -1,0 +1,17 @@
+#!/bin/bash
+
+cd ~
+echo "Updating and Upgrading"
+if [ "$USER" == "root" ]; then
+  sudo apt-get update && sudo apt-get full-upgrade -y
+else
+  sudo apt-get update && sudo apt-get upgrade -y
+fi
+
+bash <(curl -s https://raw.githubusercontent.com/damonmorgan/mad-max/master/user)
+bash <(curl -s https://raw.githubusercontent.com/damonmorgan/mad-max/master/ssh)
+bash <(curl -s https://raw.githubusercontent.com/damonmorgan/mad-max/master/docker)
+bash <(curl -s https://raw.githubusercontent.com/damonmorgan/mad-max/master/wireguard)
+
+echo "cleanup"
+sudo apt-get autoremove

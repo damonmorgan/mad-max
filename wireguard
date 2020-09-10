@@ -1,0 +1,51 @@
+#!/bin/bash
+
+if [ "$USER" != "root" ]; then
+  cd ~
+
+  if [[ -z $(dpkg -l | grep 'wireguard-tools') ]]; then
+    echo "Ensure required tools installed"
+    sudo apt-get -y install \
+      wireguard-tools \
+      mawk \
+      grep \
+      iproute2 \
+      qrencode \
+      wireguard
+  fi
+
+  if [[ -z $(ls | grep 'intnetdns') ]]; then
+    read -p 'Use local dns for wireguard clients? (Y/n) ' USE_LOCAL_DNS
+    if [ "$USE_LOCAL_DNS" == "Y" ]; then
+      ip addr sh $(ip route sh | awk '$1 == "default" { print $5 }') | grep 'inet ' | xargs | awk -F'[ /]' '{ print $2 }' > intnetdns.txt
+    fi
+  fi
+
+  FIRST_WG_INSTALL='n'
+  if [[ -z $(ls | grep 'easy-wg-quick') ]]; then
+    FIRST_WG_INSTALL='Y'
+    wget https://raw.githubusercontent.com/burghardt/easy-wg-quick/master/easy-wg-quick
+    chmod +x easy-wg-quick
+
+    read -p 'Wireguard Client Name: ' WG_CLIENT_NAME
+    ./easy-wg-quick $WG_CLIENT_NAME
+    sudo cp wghub.conf /etc/wireguard/wghub.conf
+    sudo systemctl enable wg-quick@wghub
+    sudo systemctl daemon-reload
+    sudo systemctl start wg-quick@wghub
+
+  fi
+
+  if [ "$FIRST_WG_INSTALL" == "n" ]; then
+    read -p 'Add new wireguard client? (Y/n) ' ADD_WG_CLIENT
+    if [ "$ADD_WG_CLIENT" == "Y" ]; then
+      read -p 'Wireguard Client Name: ' WG_CLIENT_NAME
+      sudo systemctl stop wg-quick@wghub
+      ./easy-wg-quick $WG_CLIENT_NAME
+      sudo cp wghub.conf /etc/wireguard/wghub.conf
+      sudo systemctl start wg-quick@wghub
+    fi
+  fi
+
+  sudo wg show
+fi

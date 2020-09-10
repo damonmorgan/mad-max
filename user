@@ -1,0 +1,26 @@
+#!/bin/bash
+
+if [ "$USER" == "root" ]; then
+  ADD_USER="Y"
+else
+  #read -p 'Add new user? (Y/n) ' ADD_USER
+  ADD_USER="n"
+fi
+
+if [ "$ADD_USER" == "Y" ]; then
+  read -p 'Username: ' USERNAME
+
+  # Create user and immediately expire password to force a change on login
+  useradd --create-home --shell "/bin/bash" --groups sudo "${USERNAME}"
+  passwd ${USERNAME}
+
+  # Create SSH directory for sudo user and move keys over
+  HOME_DIR="$(eval echo ~${USERNAME})"
+  mkdir --parents "${HOME_DIR}/.ssh"
+  cp /root/.ssh/authorized_keys "${HOME_DIR}/.ssh"
+  chmod 0700 "${HOME_DIR}/.ssh"
+  chmod 0600 "${HOME_DIR}/.ssh/authorized_keys"
+  chown --recursive "${USERNAME}":"${USERNAME}" "${HOME_DIR}/.ssh"
+
+  echo "${USERNAME} added"
+fi

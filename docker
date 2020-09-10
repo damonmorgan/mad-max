@@ -1,0 +1,131 @@
+#!/bin/bash
+
+if [ "$USER" != "root" ]; then
+  cd ~
+
+  if [[ -z $(dpkg -l | grep 'jq') ]]; then
+    echo "Ensure required tools installed"
+    sudo apt-get update
+    sudo apt-get -y install \
+      apt-transport-https \
+      ca-certificates \
+      curl \
+      gnupg-agent \
+      software-properties-common \
+      jq \
+      sqlite3
+
+    if [[ -z $(dpkg -l | grep 'haveged') ]]; then
+      read -p 'Is the host a small instance cloud server? (Y/n) ' CLOUD_SERVER_HOST
+      if [ "$CLOUD_SERVER_HOST" == "Y" ]; then
+        sudo apt-get -y install \
+          haveged
+      fi
+    fi
+  fi
+
+  if [[ -z $(docker --version | grep 'Docker version') ]]; then
+    echo "Install Docker"
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+
+    sudo add-apt-repository \
+     "deb [arch=amd64] https://download.docker.com/linux/ubuntu \
+     $(lsb_release -cs) \
+     stable"
+
+    sudo apt-get update
+    sudo apt-get -y install docker-ce docker-ce-cli containerd.io
+
+    sudo groupadd docker
+    sudo usermod -aG docker $USER
+
+    sudo systemctl enable docker
+
+    LATEST_VERSION=$(curl --silent https://api.github.com/repos/docker/compose/releases/latest | jq .name -r)
+    sudo curl -L "https://github.com/docker/compose/releases/download/${LATEST_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+
+    sudo chmod +x /usr/local/bin/docker-compose
+  fi
+
+  #echo "Turn off DNS Stub Resolver"
+  if [[ -z $(sudo cat /etc/systemd/resolved.conf | grep 'DNSStubListener=no') ]]; then
+    sudo systemctl stop systemd-resolved
+
+    sudo sed -ri 's/^#?DNS=.*/DNS=1.1.1.1/' /etc/systemd/resolved.conf
+    sudo sed -ri 's/^#?DNSStubListener=.*/DNSStubListener=no/' /etc/systemd/resolved.conf
+    sudo ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+
+    sudo systemctl start systemd-resolved
+  fi
+
+  if [[ -z $(ls | grep 'docker-compose') ]]; then
+    cd ~
+    sudo curl -L "https://raw.githubusercontent.com/damonmorgan/mad-max/master/docker-compose.yml" -o /home/$USER/docker-compose.yml
+    cat <<EOT >> .env
+CONTAINERS_CONFIG_PATH=/home/$USER/container-config
+PGID=$(id -g $USER)
+PUID=$UID
+TZ="Europe/London"
+EOT
+    su $USER
+    COMPOSE_FIRST_RUN='n'
+    if [[ -z $(docker ps | grep 'pihole') ]]; then
+      COMPOSE_FIRST_RUN='Y'
+    fi
+    docker-compose pull
+    docker-compose up --remove-orphans -d
+    docker system prune --force --all
+    docker volume prune --force
+    if [ "$COMPOSE_FIRST_RUN" == "Y" ]; then
+      SERVER_IP=$(ip addr sh $(ip route sh | awk '$1 == "default" { print $5 }') | grep 'inet ' | xargs | awk -F'[ /]' '{ print $2 }')
+      docker exec pihole pihole -a addcustomdns $SERVER_IP pi.hole
+      docker exec pihole pihole -a addcustomdns $SERVER_IP traefik.lan
+      docker exec pihole pihole -a addcustomdns $SERVER_IP heimdall.lan
+      docker restart pihole
+
+      sleep 15
+
+      sudo sqlite3 container-config/heimdall/www/app.sqlite "INSERT INTO \"items\" (\"id\",\"title\",\"colour\",\"icon\",\"url\",\"description\",\"pinned\",\"order\",\"deleted_at\",\"created_at\",\"updated_at\",\"type\",\"user_id\",\"class\") VALUES (1,'Pihole','#161b1f','icons/pihole.png','http://pi.hole','{\"enabled\":true,\"dataonly\":\"1\",\"override_url\":\"http:\/\/pihole\/admin\/api.php\"}',1,0,NULL,'2020-09-10 16:14:45','2020-09-10 16:14:45',0,1,'\App\SupportedApps\Pihole\Pihole');"
+      sudo sqlite3 container-config/heimdall/www/app.sqlite "INSERT INTO \"items\" (\"id\",\"title\",\"colour\",\"icon\",\"url\",\"description\",\"pinned\",\"order\",\"deleted_at\",\"created_at\",\"updated_at\",\"type\",\"user_id\",\"class\") VALUES (2,'Traefik','#161b1f','icons/traefik.png','http://traefik.lan','{\"enabled\":false,\"override_url\":null}',1,0,NULL,'2020-09-10 16:15:42','2020-09-10 16:15:42',0,1,'\App\SupportedApps\Traefik\Traefik');"
+      sudo sqlite3 container-config/heimdall/www/app.sqlite "INSERT INTO \"item_tag\" (\"item_id\",\"tag_id\",\"created_at\",\"updated_at\") VALUES (1,0,NULL,NULL);"
+      sudo sqlite3 container-config/heimdall/www/app.sqlite "INSERT INTO \"item_tag\" (\"item_id\",\"tag_id\",\"created_at\",\"updated_at\") VALUES (2,0,NULL,NULL);"
+    fi
+  else
+    cd ~
+    LATEST_VERSION=$(curl --silent https://api.github.com/repos/docker/compose/releases/latest | jq .name -r)
+    echo $(docker-compose --version)
+    echo $LATEST_VERSION
+    if [[ -z $(docker-compose --version | grep $LATEST_VERSION) ]]; then
+      echo "upgrading docker-compose"
+
+      sudo rm /usr/local/bin/docker-compose
+      sudo curl -L "https://github.com/docker/compose/releases/download/${LATEST_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+      sudo chmod +x /usr/local/bin/docker-compose
+    fi
+    sudo curl -L "https://raw.githubusercontent.com/damonmorgan/mad-max/master/docker-compose.yml" -o /home/$USER/docker-compose.yml
+    COMPOSE_FIRST_RUN='n'
+    if [[ -z $(docker ps | grep 'pihole') ]]; then
+      COMPOSE_FIRST_RUN='Y'
+    fi
+    docker-compose pull
+    docker-compose up --remove-orphans -d
+    docker system prune --force --all
+    docker volume prune --force
+    if [ "$COMPOSE_FIRST_RUN" == "Y" ]; then
+      SERVER_IP=$(ip addr sh $(ip route sh | awk '$1 == "default" { print $5 }') | grep 'inet ' | xargs | awk -F'[ /]' '{ print $2 }')
+      docker exec pihole pihole -a addcustomdns $SERVER_IP pi.hole
+      docker exec pihole pihole -a addcustomdns $SERVER_IP traefik.lan
+      docker exec pihole pihole -a addcustomdns $SERVER_IP heimdall.lan
+      docker restart pihole
+
+      sleep 15
+
+      sudo sqlite3 container-config/heimdall/www/app.sqlite "INSERT INTO \"items\" (\"id\",\"title\",\"colour\",\"icon\",\"url\",\"description\",\"pinned\",\"order\",\"deleted_at\",\"created_at\",\"updated_at\",\"type\",\"user_id\",\"class\") VALUES (1,'Pihole','#161b1f','icons/pihole.png','http://pi.hole','{\"enabled\":true,\"dataonly\":\"1\",\"override_url\":\"http:\/\/pihole\/admin\/api.php\"}',1,0,NULL,'2020-09-10 16:14:45','2020-09-10 16:14:45',0,1,'\App\SupportedApps\Pihole\Pihole');"
+      sudo sqlite3 container-config/heimdall/www/app.sqlite "INSERT INTO \"items\" (\"id\",\"title\",\"colour\",\"icon\",\"url\",\"description\",\"pinned\",\"order\",\"deleted_at\",\"created_at\",\"updated_at\",\"type\",\"user_id\",\"class\") VALUES (2,'Traefik','#161b1f','icons/traefik.png','http://traefik.lan','{\"enabled\":false,\"override_url\":null}',1,0,NULL,'2020-09-10 16:15:42','2020-09-10 16:15:42',0,1,'\App\SupportedApps\Traefik\Traefik');"
+      sudo sqlite3 container-config/heimdall/www/app.sqlite "INSERT INTO \"item_tag\" (\"item_id\",\"tag_id\",\"created_at\",\"updated_at\") VALUES (1,0,NULL,NULL);"
+      sudo sqlite3 container-config/heimdall/www/app.sqlite "INSERT INTO \"item_tag\" (\"item_id\",\"tag_id\",\"created_at\",\"updated_at\") VALUES (2,0,NULL,NULL);"
+    fi
+  fi
+else
+  echo "Logged in as root. Please login as a sudo user"
+fi
